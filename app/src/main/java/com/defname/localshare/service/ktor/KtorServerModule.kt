@@ -12,6 +12,7 @@ import com.defname.localshare.data.ServiceRepository
 import com.defname.localshare.domain.model.DisconnectReason
 import com.defname.localshare.domain.repository.SettingsRepository
 import com.defname.localshare.service.ServerSecurityHandler
+import com.defname.localshare.service.ktor.routes.getApprovalEvents
 import com.defname.localshare.service.ktor.routes.getAssets
 import com.defname.localshare.service.ktor.routes.getEvents
 import com.defname.localshare.service.ktor.routes.getFavIcon
@@ -19,6 +20,7 @@ import com.defname.localshare.service.ktor.routes.getFile
 import com.defname.localshare.service.ktor.routes.getFileIcon
 import com.defname.localshare.service.ktor.routes.getLanding
 import com.defname.localshare.service.ktor.routes.getThumbnail
+import com.defname.localshare.service.ktor.routes.getWaiting
 import io.ktor.http.HttpHeaders
 import io.ktor.http.HttpStatusCode
 import io.ktor.server.application.Application
@@ -46,53 +48,53 @@ fun Application.configureServerModule(
     install(PartialContent)
     install(IgnoreTrailingSlash)
 
+    // Monitoring interceptor: logs every connection open and close.
+    // SSE connections log their own disconnect reason in EventsRoute's finally block
+    // (which runs before this interceptor's finally, so the reason is preserved).
     intercept(ApplicationCallPipeline.Monitoring) {
         val connectionId = connectionLogsRepository.clientConnected(
             method = call.request.httpMethod.value,
             path = call.request.uri,
             clientIp = call.request.local.remoteHost
         )
-
         call.attributes.put(CallAttributes.connectionId, connectionId)
 
         try {
             proceed()
         } finally {
-            val discconnectReason: DisconnectReason = call.response.status()?.let {
-                DisconnectReason.Expected(it.value)
-            } ?: DisconnectReason.Unexpected.Unknown
-
-            connectionLogsRepository.clientDisconnected(
-                connectionId,
-                discconnectReason
-            )
+            val statusCode = call.response.status()?.value
+            val reason: DisconnectReason = if (statusCode != null) {
+                DisconnectReason.Expected(statusCode)
+            } else {
+                DisconnectReason.Unexpected.Unknown
+            }
+            // clientDisconnected is idempotent — if EventsRoute already closed it, this is a no-op
+            connectionLogsRepository.clientDisconnected(connectionId, reason)
         }
-
     }
 
-    // 2. Routing definieren
     routing {
+        // Favicon at root — suppress browser requests, no token needed
         get("/favicon.ico") {
             call.response.header(HttpHeaders.CacheControl, "public, max-age=31536000, immutable")
-            return@get call.respond(HttpStatusCode.NoContent)
+            call.respond(HttpStatusCode.NoContent)
         }
 
         getFavIcon(securityHandler, context)
-
         getThumbnail(securityHandler, serviceRepository, fileInfoProvider, context)
-
         getFileIcon(securityHandler, context)
-
         getAssets(securityHandler, context)
-
-        getEvents(securityHandler, serviceRepository, settingsRepository, connectionLogsRepository, context)
-
+        // Events route: no Context needed anymore
+        getEvents(securityHandler, serviceRepository, settingsRepository, connectionLogsRepository)
         getFile(securityHandler, serviceRepository, context)
-
+        getWaiting(securityHandler, context)
+        getApprovalEvents(securityHandler)
+        // Landing last — it's the wildcard catcher for /{token}/
         getLanding(securityHandler, serviceRepository, context)
 
+        // Catch-all 403 for anything not matched
         get("{...}") {
-            call.respondText("No Access\n", status = HttpStatusCode.Forbidden)
+            call.respondText("No Access.", status = HttpStatusCode.Forbidden)
         }
     }
 }

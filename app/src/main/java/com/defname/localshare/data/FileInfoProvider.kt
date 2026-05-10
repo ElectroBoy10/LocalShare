@@ -12,20 +12,19 @@ import android.util.Size
 import android.webkit.MimeTypeMap
 import com.defname.localshare.IconMap
 import com.defname.localshare.domain.model.FileInfo
+import java.util.UUID
 
 class FileInfoProvider(private val contentResolver: ContentResolver) {
+
     fun getThumbnail(fileUri: Uri?): Bitmap? {
-        if (fileUri == null) {
-            return null
-        }
+        if (fileUri == null) return null
         return try {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                 contentResolver.loadThumbnail(fileUri, Size(512, 512), null)
-            }
-            else {
+            } else {
                 null
             }
-        } catch(e: Exception) {
+        } catch (e: Exception) {
             e.printStackTrace()
             null
         }
@@ -36,9 +35,7 @@ class FileInfoProvider(private val contentResolver: ContentResolver) {
         if (fromResolver != null) return fromResolver
 
         val ext = fileName.substringAfterLast('.', "").lowercase()
-        val fromExt = MimeTypeMap.getSingleton()
-            .getMimeTypeFromExtension(ext)
-
+        val fromExt = MimeTypeMap.getSingleton().getMimeTypeFromExtension(ext)
         return fromExt ?: "application/octet-stream"
     }
 
@@ -48,16 +45,15 @@ class FileInfoProvider(private val contentResolver: ContentResolver) {
 
         contentResolver.query(uri, null, null, null, null)?.use { cursor ->
             val nameIndex = cursor.getColumnIndex(android.provider.OpenableColumns.DISPLAY_NAME)
-            if (cursor.moveToFirst()) {
-                name = cursor.getString(nameIndex)
-            }
             val sizeIndex = cursor.getColumnIndex(android.provider.OpenableColumns.SIZE)
             if (cursor.moveToFirst()) {
-                size = cursor.getLong(sizeIndex)
+                if (nameIndex >= 0) name = cursor.getString(nameIndex) ?: ""
+                if (sizeIndex >= 0) size = cursor.getLong(sizeIndex)
             }
         }
 
-        val generatedId = Integer.toHexString(uri.toString().hashCode()).lowercase()
+        // Use UUID instead of hashCode() to avoid 32-bit collision when two URIs share the same hash
+        val generatedId = UUID.randomUUID().toString().replace("-", "").take(16)
         val mimeType = getMimeType(uri, name)
         val iconFile = IconMap.getIcon(mimeType)
 

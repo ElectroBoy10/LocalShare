@@ -100,11 +100,13 @@ class MainActivity : ComponentActivity() {
             when (action) {
                 Intent.ACTION_SEND -> {
                     val uri = IntentCompat.getParcelableExtra(intent, Intent.EXTRA_STREAM, Uri::class.java)
-                    if (uri != null)  {
+                    if (uri != null) {
+                        // Take persistable permission so Application context can open this URI
+                        // even after the Activity is gone. Not all providers offer this — that's fine.
+                        tryTakePersistablePermission(uri)
                         urisToGrant.add(uri)
                         addFilesUseCase(uri)
-                    }
-                    else {
+                    } else {
                         val mime = intent.type
                         val extraText = intent.getStringExtra(Intent.EXTRA_TEXT)
                         val extraSubject = intent.getStringExtra(Intent.EXTRA_SUBJECT)
@@ -119,6 +121,7 @@ class MainActivity : ComponentActivity() {
                 Intent.ACTION_SEND_MULTIPLE -> {
                     IntentCompat.getParcelableArrayListExtra(intent, Intent.EXTRA_STREAM, Uri::class.java)?.let { uris ->
                         uris.forEach { uri ->
+                            tryTakePersistablePermission(uri)
                             urisToGrant.add(uri)
                             addFilesUseCase(uri)
                         }
@@ -126,7 +129,7 @@ class MainActivity : ComponentActivity() {
                 }
             }
 
-            // 4. Permissions transferieren, falls der Server bereits läuft
+            // Transfer permissions to Service if it's already running
             if (urisToGrant.isNotEmpty() && serviceRepository.serverRunning()) {
                 val serviceIntent = Intent(this@MainActivity, com.defname.localshare.service.LocalShareService::class.java).apply {
                     this.action = com.defname.localshare.service.LocalShareService.ACTION_GRANT_PERMISSION
@@ -142,9 +145,22 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    /**
+     * Attempts to take a persistable URI permission so the URI remains accessible
+     * from the Application context (used by ManageServiceUseCase and the Ktor service).
+     * Silently ignored if the content provider doesn't support persistable grants.
+     */
+    private fun tryTakePersistablePermission(uri: Uri) {
+        try {
+            contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        } catch (_: SecurityException) {
+            // Provider doesn't offer persistable grants — URI access limited to Activity lifetime.
+            // The startForegroundService + ClipData path handles transfer to the Service.
+        }
+    }
+
     override fun onDestroy() {
         super.onDestroy()
         scope.cancel()
     }
-
 }
