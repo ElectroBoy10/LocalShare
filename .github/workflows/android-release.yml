@@ -1,58 +1,78 @@
-name: Android Build
+name: Release Build (Signed)
 
 on:
+  push:
+    tags:
+      - 'v*'
+      - 'test_*'
   workflow_dispatch:
-    inputs:
-      build_type:
-        description: "Build type"
-        required: true
-        default: "debug"
-        type: choice
-        options:
-          - debug
-          - release
 
 jobs:
   build:
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout Code
+        uses: actions/checkout@v4
         with:
           submodules: recursive
+          fetch-depth: 1
 
-      - uses: actions/setup-java@v4
+      - name: Extract Version Code and find Changelog
+        id: find_changelog_file
+        run: |
+          VERSION_CODE=$(grep "versionCode" app/build.gradle.kts | awk '{ print $3 }')
+          echo "Version Code: $VERSION_CODE"
+
+          CHANGELOG_FILE="fastlane/metadata/android/en-US/changelogs/${VERSION_CODE}.txt"
+
+          if [ ! -f "$CHANGELOG_FILE" ]; then
+            echo "Changelog file not found: $CHANGELOG_FILE"
+            exit 1
+          fi
+
+          echo "CHANGELOG_FILE=$CHANGELOG_FILE" >> $GITHUB_OUTPUT
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
         with:
-          distribution: temurin
-          java-version: 17
+          java-version: '17'
+          distribution: 'temurin'
+          cache: gradle
 
-      - name: Grant execute permission
+      - name: Grant execute permission for gradlew
         run: chmod +x gradlew
 
-      # Debug build
-      - name: Build Debug APK
-        if: ${{ github.event.inputs.build_type == 'debug' }}
-        run: ./gradlew assembleDebug
-
-      # Release build
-      - name: Decode Keystore
-        if: ${{ github.event.inputs.build_type == 'release' }}
-        run: |
-          echo "${{ secrets.SIGNING_KEY }}" | base64 --decode > keystore.jks
-
       - name: Build Release APK
-        if: ${{ github.event.inputs.build_type == 'release' }}
         run: ./gradlew assembleRelease
-        env:
-          KEYSTORE_FILE: keystore.jks
-          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
-          KEY_STORE_PASSWORD: ${{ secrets.KEY_STORE_PASSWORD }}
-          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
 
-      - name: Upload APK
-        uses: actions/upload-artifact@v4
+      - name: Sign APK
+        uses: r0adkll/sign-android-release@v1
+        id: sign_app
+        env:
+          BUILD_TOOLS_VERSION: "34.0.0"
         with:
-          name: apk
-          path: |
-            app/build/outputs/apk/debug/*.apk
-            app/build/outputs/apk/release/*.apk
+          releaseDirectory: app/build/outputs/apk/release
+          signingKeyBase64: ${{ secrets.SIGNING_KEY }}
+          alias: ${{ secrets.KEY_ALIAS }}
+          keyStorePassword: ${{ secrets.KEY_STORE_PASSWORD }}
+          keyPassword: ${{ secrets.KEY_PASSWORD }}
+
+      - name: Rename Artifacts
+        run: |
+          mv app/build/outputs/apk/release/app-release-unsigned.apk \
+             app/build/outputs/apk/release/LocalShare-${{ github.ref_name }}-unsigned.apk
+
+          mv ${{ steps.sign_app.outputs.signedReleaseFile }} \
+             app/build/outputs/apk/release/LocalShare-${{ github.ref_name }}.apk
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          body_path: ${{ steps.find_changelog_file.outputs.CHANGELOG_FILE }}
+          files: |
+            app/build/outputs/apk/release/LocalShare-${{ github.ref_name }}.apk
+            app/build/outputs/apk/release/LocalShare-${{ github.ref_name }}-unsigned.apk
+          fail_on_unresolved_entities: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
