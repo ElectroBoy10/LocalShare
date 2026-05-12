@@ -7,7 +7,7 @@ package com.defname.localshare.service
 import com.defname.localshare.data.SecurityRepository
 import com.defname.localshare.service.notification.NotificationHelper
 import io.ktor.server.request.ApplicationRequest
-import io.ktor.server.request.cookies
+// import io.ktor.server.request.cookies
 import io.ktor.server.routing.RoutingCall
 import io.ktor.util.collections.ConcurrentSet
 import kotlinx.coroutines.Dispatchers
