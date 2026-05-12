@@ -129,7 +129,7 @@ class ServerSecurityHandler(
     // ─── Cookie Helper ────────────────────────────────────────────────────────
 
     private fun getSessionCookie(call: RoutingCall): String? =
-        call.request.cookies()["ls_session"]
+        call.request.cookies["ls_session"]
 
     // ─── Landing Access ───────────────────────────────────────────────────────
 

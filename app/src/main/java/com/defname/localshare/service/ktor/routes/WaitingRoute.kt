@@ -26,7 +26,7 @@ fun Route.getWaiting(
             return@get call.respondText("No Access.", status = HttpStatusCode.Forbidden)
         }
 
-        val sessionId = call.request.cookies()["ls_session"]
+        val sessionId = call.request.cookies["ls_session"]
             ?: return@get call.respondRedirect("/$token/")
 
         try {

@@ -71,7 +71,7 @@ fun Route.getLanding(
             return@delete call.respondText("No Access.", status = HttpStatusCode.Forbidden)
         }
 
-        val sessionId = call.request.cookies()["ls_session"]
+        val sessionId = call.request.cookies["ls_session"]
         if (sessionId != null) {
             securityHandler.revokeSession(sessionId)
         }
